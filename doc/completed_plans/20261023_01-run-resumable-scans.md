@@ -137,3 +137,18 @@ or separate lifecycle model is needed.
 - One job failure does not prevent remaining jobs from running, and the command
   returns nonzero while any current-plan job is incomplete.
 - No UDP, NSE, database, service, or general-purpose task framework is added.
+
+## Execution Notes
+
+- Implemented `nwrapper scan` with bounded `Popen` scheduling, deterministic
+  job workspaces, per-job logs, completion validation, atomic XML promotion,
+  automatic skip/resume, failure continuation, and interrupt cleanup.
+- Added `nwrapper/nmap_xml.py` as the shared owner of completed-job validation;
+  updated the CLI, runner, focused tests, README, and architecture document.
+- No material design deviations were required. The architecture wording for
+  job identifiers was corrected to match their existing port/target inputs.
+- Validation passed with 17 tests, `ruff check .`, `mypy`, and CLI help
+  inspection.
+- Implementation commit: `0a9cad6`.
+- Combined XML remains deliberately excluded here and is owned by the ordered
+  second plan. All other listed non-goals remain excluded.
