@@ -136,3 +136,19 @@ no incomplete jobs.
   report without rerunning Nmap.
 - No partial-report mode, separate state store, or unrelated reporting format
   is added.
+
+## Execution Notes
+
+- Added current-plan-only XML merging with deterministic host order, aggregate
+  timing/version/statistics metadata, Nmap DTD-compatible element ordering,
+  and atomic `combined.xml` publication.
+- Integrated stale-report invalidation and automatic rebuilding into
+  `nwrapper scan`, including runs where every authoritative job result is
+  already complete and skipped.
+- Preserved per-job XML unchanged and ignored orphan result files. No partial
+  merge mode, separate merge command, state store, UDP support, or additional
+  output formats were added.
+- Validation passed with 24 tests, `ruff check .`, `mypy`, CLI help inspection,
+  deterministic report regeneration, and `xmllint` validation against the
+  installed Nmap DTD.
+- Implementation commit: `04fccb7`.
