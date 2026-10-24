@@ -21,55 +21,38 @@ logger = logging.getLogger(__name__)
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build the top-level argument parser."""
+    """Build the argument parser."""
     parser = argparse.ArgumentParser(
         prog="nwrapper",
-        description="Plan and run exact TCP Nmap scans from Masscan .oG output.",
+        description="Run exact TCP Nmap scans from Masscan .oG output.",
     )
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    plan_parser = subparsers.add_parser(
-        "plan", help="parse Masscan output and write a grouped job manifest"
-    )
-    plan_parser.add_argument("input", type=Path, help="Masscan -oG report")
-    plan_parser.add_argument(
-        "-o",
-        "--output",
+    parser.add_argument(
+        "-i",
+        "--input",
         type=Path,
-        default=Path("nwrapper-plan.json"),
-        help="plan destination (default: nwrapper-plan.json)",
+        required=True,
+        help="Masscan -oG report",
     )
-    plan_parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=128,
-        help="maximum targets per job (default: 128)",
-    )
-
-    scan_parser = subparsers.add_parser(
-        "scan", help="run or resume grouped Nmap service scans"
-    )
-    scan_parser.add_argument("input", type=Path, help="Masscan -oG report")
-    scan_parser.add_argument(
+    parser.add_argument(
         "-o",
         "--output-dir",
         type=Path,
         default=Path("nwrapper-output"),
         help="result directory (default: nwrapper-output)",
     )
-    scan_parser.add_argument(
+    parser.add_argument(
         "--jobs",
         type=int,
         default=4,
         help="maximum concurrent Nmap processes (default: 4)",
     )
-    scan_parser.add_argument(
+    parser.add_argument(
         "--batch-size",
         type=int,
         default=128,
         help="maximum targets per Nmap process (default: 128)",
     )
-    scan_parser.add_argument(
+    parser.add_argument(
         "--host-timeout",
         default=DEFAULT_HOST_TIMEOUT,
         help="Nmap timeout for each host (default: %(default)s)",
@@ -165,26 +148,4 @@ def _run_scan(args: argparse.Namespace) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command-line interface."""
-    parser = build_parser()
-    args = parser.parse_args(argv)
-
-    if args.command == "plan":
-        try:
-            plan = _load_plan(args.input, args.batch_size)
-            write_plan(plan, args.output)
-        except (OSError, MasscanParseError, ValueError) as exc:
-            print(f"Error: {exc}", file=sys.stderr)
-            return 1
-
-        print(
-            f"Planned {plan.host_port_count} TCP host/port pairs "
-            f"across {plan.target_count} targets in {len(plan.jobs)} jobs."
-        )
-        print(f"Wrote {args.output}")
-        return 0
-
-    if args.command == "scan":
-        return _run_scan(args)
-
-    parser.error(f"unsupported command: {args.command}")
-    return 2
+    return _run_scan(build_parser().parse_args(argv))

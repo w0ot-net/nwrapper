@@ -67,26 +67,19 @@ ruff check .
 mypy
 ```
 
-Generate a plan from a Masscan grepable report:
-
-```bash
-python3 main.py plan masscan-results.oG \
-  --output nwrapper-plan.json \
-  --batch-size 128
-```
-
-The plan records every input host/TCP-port relationship and the grouped jobs
-that will execute it.
-
 Run or resume the Nmap jobs:
 
 ```bash
-python3 main.py scan masscan-results.oG \
+python3 main.py \
+  --input masscan-results.oG \
   --output-dir nwrapper-output \
   --jobs 4 \
   --batch-size 128 \
   --host-timeout 15m
 ```
+
+The generated manifest records every input host/TCP-port relationship and the
+grouped jobs that execute it.
 
 The output directory contains:
 
