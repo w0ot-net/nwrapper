@@ -1,12 +1,29 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from nwrapper.cli import main
 from nwrapper.runner import RunResult
+
+
+def test_top_level_script_runs_cli() -> None:
+    repository = Path(__file__).resolve().parents[1]
+
+    result = subprocess.run(
+        [sys.executable, str(repository / "main.py"), "--help"],
+        cwd=repository,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert "Plan and run exact TCP Nmap scans" in result.stdout
 
 
 def test_plan_command_writes_manifest(tmp_path: Path) -> None:

@@ -38,22 +38,23 @@ one for `10.0.0.3` on port `445`.
 - automatic, atomic `combined.xml` generation after every complete scan
 - append-only debug logging for scan orchestration and validation decisions
 
-## Requirements and installation
+## Requirements and usage
 
 - Linux or another POSIX system
 - Python 3.9 or newer
 - Nmap available on `PATH`
 - Masscan to create the input `.oG` report
 
-Install from a clone in a virtual environment:
+Clone the repository and run it directly:
 
 ```bash
 git clone https://github.com/w0ot-net/nwrapper.git
 cd nwrapper
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install .
+python3 main.py --help
 ```
+
+Installing with `python -m pip install .` remains optional and provides the
+shorter `nwrapper` command.
 
 ## Development
 
@@ -69,7 +70,7 @@ mypy
 Generate a plan from a Masscan grepable report:
 
 ```bash
-nwrapper plan masscan-results.oG \
+python3 main.py plan masscan-results.oG \
   --output nwrapper-plan.json \
   --batch-size 128
 ```
@@ -80,7 +81,7 @@ that will execute it.
 Run or resume the Nmap jobs:
 
 ```bash
-nwrapper scan masscan-results.oG \
+python3 main.py scan masscan-results.oG \
   --output-dir nwrapper-output \
   --jobs 4 \
   --batch-size 128 \
