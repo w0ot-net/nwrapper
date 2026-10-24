@@ -124,6 +124,7 @@ def test_merge_builds_deterministic_current_plan_report(tmp_path: Path) -> None:
     assert finished.get("time") == "250"
     assert finished.get("timestr") == "finish-250"
     assert finished.get("elapsed") == "150.00"
+    assert finished.get("exit") == "success"
     hosts = combined.find("./runstats/hosts")
     assert hosts is not None
     assert hosts.attrib == {"up": "2", "down": "1", "total": "3"}
@@ -182,4 +183,56 @@ def test_merge_requires_every_current_plan_job(tmp_path: Path) -> None:
     with pytest.raises(XmlMergeError, match="cannot parse completed Nmap XML"):
         merge_completed_xml(
             _plan(job), tmp_path / "jobs", tmp_path / "combined.xml"
+        )
+
+
+def test_merge_publishes_completed_jobs_when_other_jobs_failed(tmp_path: Path) -> None:
+    completed = ScanJob("completed", (80,), ("192.0.2.1",))
+    failed = ScanJob("failed", (443,), ("192.0.2.2",))
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    _write_job_xml(jobs_dir / "completed.xml", (("192.0.2.1", "up"),))
+    destination = tmp_path / "combined.xml"
+
+    merge_completed_xml(
+        _plan(completed, failed),
+        jobs_dir,
+        destination,
+        failed_job_ids=(failed.identifier,),
+    )
+
+    combined = ET.parse(destination).getroot()
+    assert combined.get("args") == "nwrapper partial combined report"
+    addresses = [
+        address.get("addr")
+        for address in combined.findall("./host/address")
+    ]
+    assert addresses == ["192.0.2.1"]
+    finished = combined.find("./runstats/finished")
+    assert finished is not None
+    assert finished.get("exit") == "error"
+    assert finished.get("summary") == (
+        "Nmap done; 1 IP addresses scanned by nwrapper across 1 completed jobs; "
+        "1 jobs failed and were omitted"
+    )
+
+
+def test_partial_merge_rejects_unknown_or_all_failed_jobs(tmp_path: Path) -> None:
+    job = ScanJob("job", (80,), ("192.0.2.1",))
+    plan = _plan(job)
+
+    with pytest.raises(XmlMergeError, match="not in the scan plan"):
+        merge_completed_xml(
+            plan,
+            tmp_path / "jobs",
+            tmp_path / "combined.xml",
+            failed_job_ids=("unknown",),
+        )
+
+    with pytest.raises(XmlMergeError, match="no completed jobs"):
+        merge_completed_xml(
+            plan,
+            tmp_path / "jobs",
+            tmp_path / "combined.xml",
+            failed_job_ids=(job.identifier,),
         )

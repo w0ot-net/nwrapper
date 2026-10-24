@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from nwrapper.cli import main
+from nwrapper.models import ScanPlan
 from nwrapper.runner import RunResult
 
 
@@ -39,7 +40,7 @@ def test_command_reports_runtime_errors_without_usage(
     assert "usage:" not in captured.err
 
 
-def test_scan_command_writes_manifest_and_reports_failures(
+def test_scan_command_publishes_partial_results_after_failures(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -54,24 +55,40 @@ def test_scan_command_writes_manifest_and_reports_failures(
     stale_combined = output_dir / "combined.xml"
     stale_combined.write_text("stale", encoding="utf-8")
 
-    def fake_run_jobs(*args: object, **kwargs: object) -> RunResult:
+    failed_ids: tuple[str, ...] = ()
+
+    def fake_run_jobs(
+        plan: ScanPlan, *args: object, **kwargs: object
+    ) -> RunResult:
         del args, kwargs
-        return RunResult(completed=0, skipped=0, failed_ids=("failed-job",))
+        return RunResult(completed=0, skipped=0, failed_ids=(plan.jobs[0].identifier,))
+
+    def fake_merge(
+        plan: ScanPlan,
+        jobs_dir: Path,
+        destination: Path,
+        failed_job_ids: tuple[str, ...] = (),
+    ) -> None:
+        del plan, jobs_dir
+        nonlocal failed_ids
+        failed_ids = failed_job_ids
+        destination.write_text("partial", encoding="utf-8")
 
     monkeypatch.setattr("nwrapper.cli.run_jobs", fake_run_jobs)
-    monkeypatch.setattr(
-        "nwrapper.cli.merge_completed_xml",
-        lambda *args, **kwargs: pytest.fail("failed scans must not be merged"),
-    )
+    monkeypatch.setattr("nwrapper.cli.merge_completed_xml", fake_merge)
 
     assert main(["--input", str(report), "--output-dir", str(output_dir)]) == 1
     assert (output_dir / "manifest.json").exists()
-    assert not stale_combined.exists()
-    assert "failed 1 Nmap jobs" in capsys.readouterr().out
+    assert stale_combined.read_text(encoding="utf-8") == "partial"
+    assert len(failed_ids) == 1
+    output = capsys.readouterr().out
+    assert "failed 1 Nmap jobs" in output
+    assert f"Wrote partial results to {stale_combined}" in output
     debug_log = (output_dir / "nwrapper.log").read_text(encoding="utf-8")
     assert "scan started" in debug_log
     assert "runner finished completed=0 skipped=0 failed=1" in debug_log
-    assert "scan finished exit_code=1 failed_jobs=failed-job" in debug_log
+    assert "scan finished exit_code=1 failed_jobs=" in debug_log
+    assert f"partial_xml={stale_combined}" in debug_log
 
 
 def test_scan_command_rebuilds_combined_xml_when_all_jobs_are_skipped(

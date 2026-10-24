@@ -114,7 +114,11 @@ complete for the planned targets. A host marked as timed out makes the job
 incomplete rather than publishing partial service results. Rerunning the same
 command validates and skips completed job XML, then reruns only missing,
 failed, timed-out, partial, or malformed jobs. If any job fails, the remaining
-jobs continue and the command exits nonzero.
+jobs continue, the command exits nonzero, and `combined.xml` still contains every
+successfully validated job result. The report identifies itself as partial and marks
+its Nmap run status as an error; failed job IDs remain visible in stdout and
+`nwrapper.log` so the same command can retry them later. Unvalidated `.xml.partial`
+files are never included.
 
 Every scan or resume appends timestamped DEBUG-and-higher events to
 `nwrapper.log`. It records the effective options, plan summary, job commands
@@ -127,10 +131,11 @@ prevents concurrent invocations from overwriting each other's manifest, logs,
 or XML results.
 
 The individual files under `jobs/` are the authoritative scan results.
-`combined.xml` is a derived convenience report containing every current-plan
-host in deterministic order. `nwrapper` removes an old combined report when a
-scan starts and rebuilds it only after all jobs are complete. This also means
-rerunning a completed scan launches no Nmap processes but still regenerates
-`combined.xml` from the validated job XML files.
+`combined.xml` is a derived convenience report containing validated current-plan
+hosts in deterministic order. `nwrapper` removes an old combined report when a scan
+starts and rebuilds it after all jobs settle; when jobs fail, their unavailable
+results are omitted and the report is marked partial. This also means rerunning a
+completed scan launches no Nmap processes but still regenerates `combined.xml` from
+the validated job XML files.
 
 Only scan systems you own or are explicitly authorized to assess.

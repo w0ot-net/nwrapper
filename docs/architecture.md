@@ -62,14 +62,17 @@ instead of sharing fixed manifest, partial XML, log, or combined-report paths.
 
 ## Combined report lifecycle
 
-The scan command removes any prior `combined.xml` before starting or resuming
-a plan. Once every current-plan job is complete, the merger reads only those
-job IDs, creates a fresh Nmap-shaped root, copies each expected host exactly
-once in plan order, and derives timing, version, and host statistics across
-all jobs. Orphan XML files are ignored.
+The scan command removes any prior `combined.xml` before starting or resuming a plan.
+After every job settles, the merger reads the authoritative XML for successful jobs,
+creates a fresh Nmap-shaped root, copies each available expected host exactly once in
+plan order, and derives timing, version, and host statistics across those jobs.
+Failed jobs and orphan XML files are omitted. A report that omits failed jobs uses a
+partial-report description and `finished exit="error"`; a fully successful report
+uses `finished exit="success"`.
 
 The merger writes `combined.xml.partial`, parses it as a final sanity check,
-and atomically promotes it to `combined.xml`. A failed or interrupted scan
-therefore has no report that looks current. The authoritative per-job XML is
-never modified, so a fully completed rerun can validate and skip every Nmap
-job while rebuilding the derived report.
+and atomically promotes it to `combined.xml`. An interrupted scan has no report that
+looks current, while a failed scan publishes an explicitly partial report containing
+the valid results collected so far. The authoritative per-job XML is never modified,
+so a rerun can validate and skip every completed Nmap job, retry failures, and rebuild
+the derived report.

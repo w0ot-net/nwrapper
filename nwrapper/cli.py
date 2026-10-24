@@ -121,14 +121,22 @@ def _run_scan(args: argparse.Namespace) -> int:
             if result.interrupted:
                 logger.warning("scan finished exit_code=130 status=interrupted")
                 return 130
+
+            merge_completed_xml(
+                plan,
+                args.output_dir / "jobs",
+                combined_xml,
+                failed_job_ids=result.failed_ids,
+            )
             if result.failed_ids:
                 logger.error(
-                    "scan finished exit_code=1 failed_jobs=%s",
+                    "scan finished exit_code=1 failed_jobs=%s partial_xml=%s",
                     ",".join(result.failed_ids),
+                    combined_xml,
                 )
+                print(f"Wrote partial results to {combined_xml}")
                 return 1
 
-            merge_completed_xml(plan, args.output_dir / "jobs", combined_xml)
             logger.info("scan finished exit_code=0 combined_xml=%s", combined_xml)
             print(f"Wrote {combined_xml}")
             return 0

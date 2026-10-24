@@ -7,6 +7,7 @@ import ipaddress
 import logging
 import os
 import xml.etree.ElementTree as ET
+from collections.abc import Collection
 from pathlib import Path
 
 from nwrapper.models import ScanPlan
@@ -45,15 +46,31 @@ def _common_value(values: list[str]) -> str:
 
 
 def merge_completed_xml(
-    plan: ScanPlan, jobs_dir: Path, destination: Path
+    plan: ScanPlan,
+    jobs_dir: Path,
+    destination: Path,
+    failed_job_ids: Collection[str] = (),
 ) -> None:
-    """Atomically publish a combined XML report for every job in ``plan``."""
+    """Atomically publish completed results, marking failed jobs as omitted."""
     if not plan.jobs:
         raise XmlMergeError("cannot merge an empty scan plan")
 
+    failed = frozenset(failed_job_ids)
+    planned_ids = {job.identifier for job in plan.jobs}
+    unknown = sorted(failed - planned_ids)
+    if unknown:
+        raise XmlMergeError(
+            f"failed job IDs are not in the scan plan: {','.join(unknown)}"
+        )
+    completed_jobs = tuple(job for job in plan.jobs if job.identifier not in failed)
+    if not completed_jobs:
+        raise XmlMergeError("cannot merge a scan with no completed jobs")
+
     logger.info(
-        "combined report assembly started jobs=%d destination=%s",
-        len(plan.jobs),
+        "combined report assembly started completed_jobs=%d failed_jobs=%d "
+        "destination=%s",
+        len(completed_jobs),
+        len(failed),
         destination,
     )
 
@@ -66,7 +83,7 @@ def merge_completed_xml(
     up = 0
     down = 0
 
-    for job in plan.jobs:
+    for job in completed_jobs:
         source = jobs_dir / f"{job.identifier}.xml"
         try:
             root = load_completed_xml(source, job.targets)
@@ -135,7 +152,11 @@ def merge_completed_xml(
     latest = max(finishes, key=lambda item: item[0])
     root_attributes = {
         "scanner": "nmap",
-        "args": "nwrapper combined report",
+        "args": (
+            "nwrapper partial combined report"
+            if failed
+            else "nwrapper combined report"
+        ),
         "start": earliest[1],
         "version": _common_value(versions),
         "xmloutputversion": _common_value(xml_versions),
@@ -155,9 +176,10 @@ def merge_completed_xml(
         "elapsed": f"{elapsed:.2f}",
         "summary": (
             f"Nmap done; {len(combined_hosts)} IP addresses scanned "
-            f"by nwrapper across {len(plan.jobs)} jobs"
+            f"by nwrapper across {len(completed_jobs)} completed jobs"
+            + (f"; {len(failed)} jobs failed and were omitted" if failed else "")
         ),
-        "exit": "success",
+        "exit": "error" if failed else "success",
     }
     if latest[2]:
         finished_attributes["timestr"] = latest[2]
