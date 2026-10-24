@@ -81,6 +81,19 @@ python3 main.py \
 The generated manifest records every input host/TCP-port relationship and the
 grouped jobs that execute it.
 
+During a scan, stdout reports the resume-aware job totals, each job start and
+outcome, and an aggregate heartbeat every 30 seconds while work is active:
+
+```text
+[*] 18 jobs: 5 already complete, 13 pending, 4 workers
+[>] Started a1b2c3d4e5f60718: 24 hosts, 2 ports
+[+] Completed a1b2c3d4e5f60718 in 31.4s (6/18 finished)
+[*] Progress: 6/18 finished, 4 running, 8 pending, 0 failed
+```
+
+The stdout stream stays concise; exact commands, process IDs, paths, and failure
+diagnostics remain in `nwrapper.log`.
+
 The output directory contains:
 
 ```text

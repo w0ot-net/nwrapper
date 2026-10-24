@@ -19,6 +19,7 @@ from nwrapper.nmap_xml import NmapXmlError, load_completed_xml
 logger = logging.getLogger(__name__)
 
 DEFAULT_HOST_TIMEOUT = "15m"
+PROGRESS_INTERVAL_SECONDS = 30.0
 
 
 class RunnerError(RuntimeError):
@@ -41,6 +42,11 @@ class _ActiveJob:
     process: subprocess.Popen[bytes]
     partial_xml: Path
     final_xml: Path
+    started_at: float
+
+
+def _progress(message: str) -> None:
+    print(message, flush=True)
 
 
 def build_nmap_command(
@@ -126,6 +132,7 @@ def _start_job(
             stdout=log,
             stderr=subprocess.STDOUT,
         )
+    started_at = time.monotonic()
     logger.debug("job command id=%s command=%s", job.identifier, shlex.join(command))
     logger.info(
         "job started id=%s pid=%d targets=%d ports=%s nmap_log=%s",
@@ -135,7 +142,7 @@ def _start_job(
         ",".join(str(port) for port in job.ports),
         log_file,
     )
-    return _ActiveJob(job, process, partial_xml, final_xml)
+    return _ActiveJob(job, process, partial_xml, final_xml, started_at)
 
 
 def _stop_active(active: list[_ActiveJob]) -> None:
@@ -201,6 +208,12 @@ def run_jobs(
     active: list[_ActiveJob] = []
     completed = 0
     failed_ids: list[str] = []
+    total_jobs = len(plan.jobs)
+    worker_count = min(max_processes, len(pending))
+    _progress(
+        f"[*] {total_jobs} jobs: {skipped} already complete, "
+        f"{len(pending)} pending, {worker_count} workers"
+    )
 
     if not pending:
         logger.info(
@@ -215,14 +228,18 @@ def run_jobs(
     if resolved_nmap is None:
         raise RunnerError(f"Nmap executable not found: {nmap_binary}")
     logger.debug("Nmap executable resolved path=%s", resolved_nmap)
+    next_heartbeat = time.monotonic() + PROGRESS_INTERVAL_SECONDS
 
     try:
         while pending or active:
             while pending and len(active) < max_processes:
                 job = pending.popleft()
                 try:
-                    active.append(
-                        _start_job(job, jobs_dir, host_timeout, resolved_nmap)
+                    item = _start_job(job, jobs_dir, host_timeout, resolved_nmap)
+                    active.append(item)
+                    _progress(
+                        f"[>] Started {job.identifier}: {len(job.targets)} hosts, "
+                        f"{len(job.ports)} ports"
                     )
                 except OSError as exc:
                     failed_ids.append(job.identifier)
@@ -230,6 +247,11 @@ def run_jobs(
                         "job failed to start id=%s reason=%s",
                         job.identifier,
                         exc,
+                    )
+                    finished = skipped + completed + len(failed_ids)
+                    _progress(
+                        f"[!] Failed to start {job.identifier} "
+                        f"({finished}/{total_jobs} finished); see nwrapper.log"
                     )
 
             made_progress = False
@@ -252,6 +274,13 @@ def run_jobs(
                         item.job.identifier,
                         return_code,
                     )
+                    elapsed = time.monotonic() - item.started_at
+                    finished = skipped + completed + len(failed_ids)
+                    _progress(
+                        f"[!] Failed {item.job.identifier} after {elapsed:.1f}s "
+                        f"({finished}/{total_jobs} finished): Nmap exited with "
+                        f"code {return_code}; see nwrapper.log"
+                    )
                     continue
                 try:
                     load_completed_xml(item.partial_xml, item.job.targets)
@@ -262,6 +291,13 @@ def run_jobs(
                         item.job.identifier,
                         item.partial_xml,
                         exc,
+                    )
+                    elapsed = time.monotonic() - item.started_at
+                    finished = skipped + completed + len(failed_ids)
+                    _progress(
+                        f"[!] Failed {item.job.identifier} after {elapsed:.1f}s "
+                        f"({finished}/{total_jobs} finished): XML validation "
+                        "failed; see nwrapper.log"
                     )
                     continue
                 try:
@@ -276,6 +312,13 @@ def run_jobs(
                         item.final_xml,
                         exc,
                     )
+                    elapsed = time.monotonic() - item.started_at
+                    finished = skipped + completed + len(failed_ids)
+                    _progress(
+                        f"[!] Failed {item.job.identifier} after {elapsed:.1f}s "
+                        f"({finished}/{total_jobs} finished): XML promotion "
+                        "failed; see nwrapper.log"
+                    )
                     continue
                 completed += 1
                 logger.info(
@@ -283,6 +326,22 @@ def run_jobs(
                     item.job.identifier,
                     item.final_xml,
                 )
+                elapsed = time.monotonic() - item.started_at
+                finished = skipped + completed + len(failed_ids)
+                _progress(
+                    f"[+] Completed {item.job.identifier} in {elapsed:.1f}s "
+                    f"({finished}/{total_jobs} finished)"
+                )
+
+            now = time.monotonic()
+            if active and now >= next_heartbeat:
+                finished = skipped + completed + len(failed_ids)
+                _progress(
+                    f"[*] Progress: {finished}/{total_jobs} finished, "
+                    f"{len(active)} running, {len(pending)} pending, "
+                    f"{len(failed_ids)} failed"
+                )
+                next_heartbeat = now + PROGRESS_INTERVAL_SECONDS
 
             if active and not made_progress:
                 time.sleep(poll_interval)

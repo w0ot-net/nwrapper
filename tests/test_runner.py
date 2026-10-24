@@ -6,7 +6,9 @@ from pathlib import Path
 
 import pytest
 
+from nwrapper import runner
 from nwrapper.models import ScanJob, ScanPlan
+from nwrapper.nmap_xml import NmapXmlError
 from nwrapper.runlog import configure_debug_log
 from nwrapper.runner import build_nmap_command, run_jobs
 
@@ -135,8 +137,23 @@ def test_build_nmap_command_is_tcp_only_and_uses_service_detection() -> None:
     assert "-sU" not in command
 
 
+def test_progress_output_is_flushed(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, bool]] = []
+
+    def capture(message: str, *, flush: bool = False) -> None:
+        calls.append((message, flush))
+
+    monkeypatch.setattr("builtins.print", capture)
+
+    runner._progress("status")
+
+    assert calls == [("status", True)]
+
+
 def test_run_jobs_bounds_concurrency_and_promotes_xml(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     jobs = tuple(
         ScanJob(f"job-{number}", (80,), (f"192.0.2.{number}",))
@@ -159,10 +176,18 @@ def test_run_jobs_bounds_concurrency_and_promotes_xml(
     assert "runner started jobs=4 max_processes=2" in log_text
     assert "job command id=job-1" in log_text
     assert "job completed id=job-4" in log_text
+    output = capsys.readouterr().out
+    assert "[*] 4 jobs: 0 already complete, 4 pending, 2 workers" in output
+    assert "[>] Started job-1: 1 hosts, 1 ports" in output
+    assert "[+] Completed job-4" in output
+    assert "(4/4 finished)" in output
+    assert "[*] Progress:" not in output
 
 
 def test_run_jobs_skips_valid_results(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     job = ScanJob("existing", (443,), ("192.0.2.1",))
     jobs_dir = tmp_path / "jobs"
@@ -186,6 +211,9 @@ def test_run_jobs_skips_valid_results(
     assert result.completed == 0
     assert result.skipped == 1
     assert result.failed_ids == ()
+    assert capsys.readouterr().out == (
+        "[*] 1 jobs: 1 already complete, 0 pending, 0 workers\n"
+    )
 
 
 def test_run_jobs_reruns_nmap_host_timeouts(
@@ -245,7 +273,9 @@ def test_run_jobs_reruns_invalid_and_partial_results(
 
 
 def test_run_jobs_continues_after_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     failed = ScanJob("failed", (80,), ("192.0.2.1",))
     successful = ScanJob("successful", (443,), ("192.0.2.2",))
@@ -265,6 +295,111 @@ def test_run_jobs_continues_after_failure(
     assert result.failed_ids == ("failed",)
     assert not (tmp_path / "jobs" / "failed.xml").exists()
     assert (tmp_path / "jobs" / "successful.xml").exists()
+    output = capsys.readouterr().out
+    assert "[!] Failed failed" in output
+    assert "Nmap exited with code 1" in output
+    assert "(1/2 finished)" in output
+    assert "[+] Completed successful" in output
+    assert "(2/2 finished)" in output
+
+
+def test_run_jobs_reports_launch_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    job = ScanJob("launch-failure", (80,), ("192.0.2.1",))
+    monkeypatch.setattr("nwrapper.runner.shutil.which", lambda _: "/usr/bin/nmap")
+
+    def fail_to_start(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise OSError("could not start")
+
+    monkeypatch.setattr("nwrapper.runner.subprocess.Popen", fail_to_start)
+
+    result = run_jobs(
+        _plan(job), tmp_path, max_processes=1, host_timeout="15m", poll_interval=0
+    )
+
+    assert result.failed_ids == ("launch-failure",)
+    assert "[!] Failed to start launch-failure (1/1 finished)" in (
+        capsys.readouterr().out
+    )
+
+
+def test_run_jobs_reports_xml_validation_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    job = ScanJob("invalid-xml", (80,), ("192.0.2.1",))
+    original_load = runner.load_completed_xml
+
+    def reject_partial(path: Path, targets: tuple[str, ...]) -> ET.Element:
+        if path.name.endswith(".xml.partial"):
+            raise NmapXmlError("invalid test XML")
+        return original_load(path, targets)
+
+    monkeypatch.setattr("nwrapper.runner.shutil.which", lambda _: "/usr/bin/nmap")
+    monkeypatch.setattr("nwrapper.runner.subprocess.Popen", FakeProcess)
+    monkeypatch.setattr("nwrapper.runner.load_completed_xml", reject_partial)
+
+    result = run_jobs(
+        _plan(job), tmp_path, max_processes=1, host_timeout="15m", poll_interval=0
+    )
+
+    assert result.failed_ids == ("invalid-xml",)
+    assert "XML validation failed" in capsys.readouterr().out
+
+
+def test_run_jobs_reports_xml_promotion_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    job = ScanJob("promotion-failure", (80,), ("192.0.2.1",))
+    monkeypatch.setattr("nwrapper.runner.shutil.which", lambda _: "/usr/bin/nmap")
+    monkeypatch.setattr("nwrapper.runner.subprocess.Popen", FakeProcess)
+
+    def fail_to_promote(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise OSError("could not promote")
+
+    monkeypatch.setattr("nwrapper.runner.os.replace", fail_to_promote)
+
+    result = run_jobs(
+        _plan(job), tmp_path, max_processes=1, host_timeout="15m", poll_interval=0
+    )
+
+    assert result.failed_ids == ("promotion-failure",)
+    assert "XML promotion failed" in capsys.readouterr().out
+
+
+def test_run_jobs_prints_heartbeat_for_long_running_job(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    job = ScanJob("long-running", (80,), ("192.0.2.1",))
+    clock = [0.0]
+
+    def advance_clock(_: float) -> None:
+        clock[0] += 31.0
+
+    monkeypatch.setattr("nwrapper.runner.shutil.which", lambda _: "/usr/bin/nmap")
+    monkeypatch.setattr("nwrapper.runner.subprocess.Popen", FakeProcess)
+    monkeypatch.setattr("nwrapper.runner.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr("nwrapper.runner.time.sleep", advance_clock)
+    FakeProcess.polls_per_process = 2
+
+    result = run_jobs(
+        _plan(job), tmp_path, max_processes=1, host_timeout="15m", poll_interval=0
+    )
+
+    assert result.completed == 1
+    output = capsys.readouterr().out
+    assert output.count("[*] Progress:") == 1
+    assert "[*] Progress: 0/1 finished, 1 running, 0 pending, 0 failed" in output
 
 
 def test_run_jobs_stops_active_processes_on_interrupt(
