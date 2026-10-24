@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from nwrapper.models import ScanJob, ScanPlan
+from nwrapper.runlog import configure_debug_log
 from nwrapper.runner import build_nmap_command, run_jobs
 
 
@@ -18,9 +19,12 @@ class FakeProcess:
     polls_per_process = 1
     failing_target: str | None = None
     interrupted: list[FakeProcess] = []
+    next_pid = 1000
 
     def __init__(self, command: list[str], **_: object) -> None:
         self.command = command
+        self.pid = FakeProcess.next_pid
+        FakeProcess.next_pid += 1
         self.return_code = 0
         self.polls_remaining = FakeProcess.polls_per_process
         self.stopped = False
@@ -87,6 +91,7 @@ def reset_fake_process() -> None:
     FakeProcess.polls_per_process = 1
     FakeProcess.failing_target = None
     FakeProcess.interrupted = []
+    FakeProcess.next_pid = 1000
 
 
 def _plan(*jobs: ScanJob) -> ScanPlan:
@@ -137,6 +142,7 @@ def test_run_jobs_bounds_concurrency_and_promotes_xml(
     )
     monkeypatch.setattr("nwrapper.runner.shutil.which", lambda _: "/usr/bin/nmap")
     monkeypatch.setattr("nwrapper.runner.subprocess.Popen", FakeProcess)
+    debug_log = configure_debug_log(tmp_path)
 
     result = run_jobs(
         _plan(*jobs), tmp_path, max_processes=2, host_timeout="15m", poll_interval=0
@@ -147,6 +153,10 @@ def test_run_jobs_bounds_concurrency_and_promotes_xml(
     assert FakeProcess.maximum_active == 2
     assert all((tmp_path / "jobs" / f"{job.identifier}.xml").exists() for job in jobs)
     assert not list((tmp_path / "jobs").glob("*.xml.partial"))
+    log_text = debug_log.read_text(encoding="utf-8")
+    assert "runner started jobs=4 max_processes=2" in log_text
+    assert "job command id=job-1" in log_text
+    assert "job completed id=job-4" in log_text
 
 
 def test_run_jobs_skips_valid_results(
@@ -172,6 +182,33 @@ def test_run_jobs_skips_valid_results(
     assert result.failed_ids == ()
 
 
+def test_run_jobs_logs_nmap_host_timeouts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    job = ScanJob("timed-out", (443,), ("192.0.2.1",))
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    result_xml = jobs_dir / "timed-out.xml"
+    FakeProcess._write_xml(result_xml, job.targets)
+    tree = ET.parse(result_xml)
+    host = tree.getroot().find("host")
+    assert host is not None
+    host.set("timedout", "true")
+    tree.write(result_xml, encoding="unicode", xml_declaration=True)
+    monkeypatch.setattr("nwrapper.runner.shutil.which", lambda _: "/usr/bin/nmap")
+    debug_log = configure_debug_log(tmp_path)
+
+    result = run_jobs(
+        _plan(job), tmp_path, max_processes=1, host_timeout="15m", poll_interval=0
+    )
+
+    assert result.skipped == 1
+    assert (
+        "job completed with Nmap host timeouts id=timed-out "
+        "targets=192.0.2.1"
+    ) in debug_log.read_text(encoding="utf-8")
+
+
 def test_run_jobs_reruns_invalid_and_partial_results(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -182,6 +219,7 @@ def test_run_jobs_reruns_invalid_and_partial_results(
     (jobs_dir / "retry.xml.partial").write_text("stale", encoding="utf-8")
     monkeypatch.setattr("nwrapper.runner.shutil.which", lambda _: "/usr/bin/nmap")
     monkeypatch.setattr("nwrapper.runner.subprocess.Popen", FakeProcess)
+    debug_log = configure_debug_log(tmp_path)
 
     result = run_jobs(
         _plan(job), tmp_path, max_processes=1, host_timeout="15m", poll_interval=0
@@ -191,6 +229,9 @@ def test_run_jobs_reruns_invalid_and_partial_results(
     assert result.skipped == 0
     assert not (jobs_dir / "retry.xml.partial").exists()
     assert ET.parse(jobs_dir / "retry.xml").getroot().tag == "nmaprun"
+    assert "job result is not reusable id=retry" in debug_log.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_run_jobs_continues_after_failure(

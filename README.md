@@ -35,6 +35,7 @@ one for `10.0.0.3` on port `445`.
 - validated, atomic XML results for each job
 - automatic job-level resume after interruption or failure
 - automatic, atomic `combined.xml` generation after every complete scan
+- append-only debug logging for scan orchestration and validation decisions
 
 ## Development
 
@@ -74,6 +75,7 @@ The output directory contains:
 nwrapper-output/
 ├── manifest.json
 ├── combined.xml
+├── nwrapper.log
 └── jobs/
     ├── <job-id>.targets
     ├── <job-id>.log
@@ -86,6 +88,12 @@ complete for the planned targets. Rerunning the same command validates and
 skips completed job XML, then reruns only missing, failed, partial, or malformed
 jobs. If any job fails, the remaining jobs continue and the command exits
 nonzero.
+
+Every scan or resume appends timestamped DEBUG-and-higher events to
+`nwrapper.log`. It records the effective options, plan summary, job commands
+and process IDs, skip/retry decisions, exact XML validation errors, Nmap host
+timeouts, interruption cleanup, and combined-report publication. Raw Nmap
+output remains in each job's own `.log` file.
 
 The individual files under `jobs/` are the authoritative scan results.
 `combined.xml` is a derived convenience report containing every current-plan

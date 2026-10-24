@@ -56,6 +56,10 @@ def test_scan_command_writes_manifest_and_reports_failures(
     assert (output_dir / "manifest.json").exists()
     assert not stale_combined.exists()
     assert "failed 1 Nmap jobs" in capsys.readouterr().out
+    debug_log = (output_dir / "nwrapper.log").read_text(encoding="utf-8")
+    assert "scan started" in debug_log
+    assert "runner finished completed=0 skipped=0 failed=1" in debug_log
+    assert "scan finished exit_code=1 failed_jobs=failed-job" in debug_log
 
 
 def test_scan_command_rebuilds_combined_xml_when_all_jobs_are_skipped(

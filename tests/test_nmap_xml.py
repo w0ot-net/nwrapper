@@ -56,5 +56,5 @@ def test_load_completed_xml_rejects_wrong_targets(tmp_path: Path) -> None:
     path = tmp_path / "result.xml"
     _write_xml(path, ("192.0.2.2",))
 
-    with pytest.raises(NmapXmlError, match="do not match"):
+    with pytest.raises(NmapXmlError, match="missing=192.0.2.1; unexpected=192.0.2.2"):
         load_completed_xml(path, ("192.0.2.1",))

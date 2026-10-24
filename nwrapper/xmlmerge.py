@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import copy
 import ipaddress
+import logging
 import os
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from nwrapper.models import ScanPlan
 from nwrapper.nmap_xml import NmapXmlError, host_address, load_completed_xml
+
+logger = logging.getLogger(__name__)
 
 
 class XmlMergeError(ValueError):
@@ -48,6 +51,12 @@ def merge_completed_xml(
     if not plan.jobs:
         raise XmlMergeError("cannot merge an empty scan plan")
 
+    logger.info(
+        "combined report assembly started jobs=%d destination=%s",
+        len(plan.jobs),
+        destination,
+    )
+
     starts: list[tuple[float, str, str | None]] = []
     finishes: list[tuple[float, str, str | None]] = []
     versions: list[str] = []
@@ -62,7 +71,19 @@ def merge_completed_xml(
         try:
             root = load_completed_xml(source, job.targets)
         except NmapXmlError as exc:
+            logger.error(
+                "combined report source validation failed id=%s path=%s reason=%s",
+                job.identifier,
+                source,
+                exc,
+            )
             raise XmlMergeError(str(exc)) from exc
+        logger.debug(
+            "combined report source accepted id=%s path=%s targets=%d",
+            job.identifier,
+            source,
+            len(job.targets),
+        )
 
         start_value = _required_attribute(root, "start", source)
         starts.append(
@@ -152,6 +173,13 @@ def merge_completed_xml(
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_name(f"{destination.name}.partial")
     temporary.unlink(missing_ok=True)
+    logger.debug(
+        "writing combined report temporary=%s hosts=%d up=%d down=%d",
+        temporary,
+        len(combined_hosts),
+        up,
+        down,
+    )
     try:
         ET.ElementTree(combined).write(
             temporary, encoding="utf-8", xml_declaration=True
@@ -162,4 +190,14 @@ def merge_completed_xml(
         os.replace(temporary, destination)
     except (OSError, ET.ParseError) as exc:
         temporary.unlink(missing_ok=True)
+        logger.error(
+            "combined report publication failed destination=%s reason=%s",
+            destination,
+            exc,
+        )
         raise XmlMergeError(f"cannot publish combined Nmap XML: {exc}") from exc
+    logger.info(
+        "combined report published destination=%s hosts=%d",
+        destination,
+        len(combined_hosts),
+    )

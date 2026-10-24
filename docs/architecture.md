@@ -22,6 +22,7 @@ jobs while preserving exact host-to-TCP-port relationships.
 - `planner.py`: group identical port sets, chunk targets, and assign stable
   job identifiers.
 - `manifest.py`: serialize plans atomically.
+- `runlog.py`: configure the append-only per-output-directory diagnostic log.
 - `runner.py`: construct Nmap argument vectors and own bounded subprocess
   concurrency, cancellation, and atomic XML promotion.
 - `nmap_xml.py`: validate that per-job XML is complete for exactly its planned
@@ -46,6 +47,12 @@ rerun, while valid final XML is skipped.
 
 Large groups are split into bounded chunks so job-level reruns remain cheap
 and the scheduler has enough work to use its configured concurrency.
+
+Each scan invocation appends orchestration events to `<output-dir>/nwrapper.log`
+at DEBUG level. Run boundaries, effective settings, process launches and exit
+codes, resume decisions, XML validation failures, detected Nmap host timeouts,
+interrupt cleanup, and report publication are logged there. Per-job `.log`
+files remain the non-duplicated source for raw Nmap stdout and stderr.
 
 ## Combined report lifecycle
 

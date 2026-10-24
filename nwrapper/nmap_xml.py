@@ -44,8 +44,12 @@ def load_completed_xml(path: Path, expected_targets: Iterable[str]) -> ET.Elemen
         raise NmapXmlError(f"Nmap XML contains duplicate hosts: {path}")
 
     expected = {str(ipaddress.ip_address(target)) for target in expected_targets}
-    if set(actual) != expected:
+    actual_set = set(actual)
+    if actual_set != expected:
+        missing = ",".join(sorted(expected - actual_set)) or "none"
+        unexpected = ",".join(sorted(actual_set - expected)) or "none"
         raise NmapXmlError(
-            f"Nmap XML targets do not match the planned job: {path}"
+            f"Nmap XML targets do not match the planned job: {path} "
+            f"(missing={missing}; unexpected={unexpected})"
         )
     return root
