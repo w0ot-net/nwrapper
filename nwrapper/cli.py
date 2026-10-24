@@ -8,14 +8,16 @@ from pathlib import Path
 
 from nwrapper.manifest import write_plan
 from nwrapper.masscan import MasscanParseError, parse_grepable
+from nwrapper.models import ScanPlan
 from nwrapper.planner import build_plan
+from nwrapper.runner import RunnerError, run_jobs
 
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the top-level argument parser."""
     parser = argparse.ArgumentParser(
         prog="nwrapper",
-        description="Plan exact TCP Nmap service scans from Masscan .oG output.",
+        description="Plan and run exact TCP Nmap scans from Masscan .oG output.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -36,7 +38,43 @@ def build_parser() -> argparse.ArgumentParser:
         default=128,
         help="maximum targets per job (default: 128)",
     )
+
+    scan_parser = subparsers.add_parser(
+        "scan", help="run or resume grouped Nmap service scans"
+    )
+    scan_parser.add_argument("input", type=Path, help="Masscan -oG report")
+    scan_parser.add_argument(
+        "-o",
+        "--output-dir",
+        type=Path,
+        default=Path("nwrapper-output"),
+        help="result directory (default: nwrapper-output)",
+    )
+    scan_parser.add_argument(
+        "--jobs",
+        type=int,
+        default=4,
+        help="maximum concurrent Nmap processes (default: 4)",
+    )
+    scan_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=128,
+        help="maximum targets per Nmap process (default: 128)",
+    )
+    scan_parser.add_argument(
+        "--host-timeout",
+        default="15m",
+        help="Nmap timeout for each host (default: 15m)",
+    )
     return parser
+
+
+def _load_plan(input_path: Path, batch_size: int) -> ScanPlan:
+    targets = parse_grepable(input_path)
+    if not targets:
+        raise ValueError("the input contains no open TCP ports")
+    return build_plan(input_path, targets, batch_size)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -46,10 +84,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "plan":
         try:
-            targets = parse_grepable(args.input)
-            if not targets:
-                parser.error("the input contains no open TCP ports")
-            plan = build_plan(args.input, targets, args.batch_size)
+            plan = _load_plan(args.input, args.batch_size)
             write_plan(plan, args.output)
         except (OSError, MasscanParseError, ValueError) as exc:
             parser.error(str(exc))
@@ -60,6 +95,31 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(f"Wrote {args.output}")
         return 0
+
+    if args.command == "scan":
+        try:
+            plan = _load_plan(args.input, args.batch_size)
+            if args.jobs < 1:
+                raise ValueError("jobs must be at least 1")
+            write_plan(plan, args.output_dir / "manifest.json")
+            result = run_jobs(
+                plan,
+                args.output_dir,
+                max_processes=args.jobs,
+                host_timeout=args.host_timeout,
+            )
+        except (OSError, MasscanParseError, RunnerError, ValueError) as exc:
+            parser.error(str(exc))
+
+        print(
+            f"Completed {result.completed}, skipped {result.skipped}, "
+            f"failed {len(result.failed_ids)} Nmap jobs."
+        )
+        if result.failed_ids:
+            print(f"Failed job IDs: {', '.join(result.failed_ids)}")
+        if result.interrupted:
+            return 130
+        return 1 if result.failed_ids else 0
 
     parser.error(f"unsupported command: {args.command}")
     return 2

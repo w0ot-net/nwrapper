@@ -1,7 +1,12 @@
+from __future__ import annotations
+
 import json
 from pathlib import Path
 
+import pytest
+
 from nwrapper.cli import main
+from nwrapper.runner import RunResult
 
 
 def test_plan_command_writes_manifest(tmp_path: Path) -> None:
@@ -20,3 +25,26 @@ def test_plan_command_writes_manifest(tmp_path: Path) -> None:
     assert manifest["target_count"] == 2
     assert manifest["host_port_count"] == 2
     assert manifest["jobs"][0]["targets"] == ["192.0.2.1", "192.0.2.2"]
+
+
+def test_scan_command_writes_manifest_and_reports_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    report = tmp_path / "scan.oG"
+    output_dir = tmp_path / "results"
+    report.write_text(
+        "Host: 192.0.2.1 ()\tPorts: 80/open/tcp//http///\n",
+        encoding="utf-8",
+    )
+
+    def fake_run_jobs(*args: object, **kwargs: object) -> RunResult:
+        del args, kwargs
+        return RunResult(completed=0, skipped=0, failed_ids=("failed-job",))
+
+    monkeypatch.setattr("nwrapper.cli.run_jobs", fake_run_jobs)
+
+    assert main(["scan", str(report), "--output-dir", str(output_dir)]) == 1
+    assert (output_dir / "manifest.json").exists()
+    assert "failed 1 Nmap jobs" in capsys.readouterr().out

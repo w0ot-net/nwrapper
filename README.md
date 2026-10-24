@@ -23,9 +23,7 @@ For example:
 becomes two jobs: one for `10.0.0.1` and `10.0.0.2` on ports `22,80,443`, and
 one for `10.0.0.3` on port `445`.
 
-## Current status
-
-This initial skeleton implements:
+## Features
 
 - Masscan `.oG` parsing for open TCP ports
 - duplicate removal and deterministic address/port ordering
@@ -33,11 +31,12 @@ This initial skeleton implements:
 - configurable target chunking
 - deterministic job identifiers
 - JSON plan generation
-- construction of the intended `nmap -Pn -n -sV` command
+- bounded concurrent `nmap -Pn -n -sV` execution
+- validated, atomic XML results for each job
+- automatic job-level resume after interruption or failure
 
-The bounded-concurrency runner, durable resume state, atomic per-job XML
-handling, and combined XML report are the next implementation stages. The
-planned boundaries are documented in [docs/architecture.md](docs/architecture.md).
+A combined XML report is the remaining implementation stage. The component
+boundaries are documented in [docs/architecture.md](docs/architecture.md).
 
 ## Development
 
@@ -59,6 +58,34 @@ nwrapper plan masscan-results.oG \
 ```
 
 The plan records every input host/TCP-port relationship and the grouped jobs
-that will eventually execute it.
+that will execute it.
+
+Run or resume the Nmap jobs:
+
+```bash
+nwrapper scan masscan-results.oG \
+  --output-dir nwrapper-output \
+  --jobs 4 \
+  --batch-size 128 \
+  --host-timeout 15m
+```
+
+The output directory contains:
+
+```text
+nwrapper-output/
+├── manifest.json
+└── jobs/
+    ├── <job-id>.targets
+    ├── <job-id>.log
+    └── <job-id>.xml
+```
+
+While Nmap is running, it writes `<job-id>.xml.partial`. `nwrapper` promotes
+that file to `<job-id>.xml` only after Nmap exits successfully and the XML is
+complete for the planned targets. Rerunning the same command validates and
+skips completed job XML, then reruns only missing, failed, partial, or malformed
+jobs. If any job fails, the remaining jobs continue and the command exits
+nonzero.
 
 Only scan systems you own or are explicitly authorized to assess.
