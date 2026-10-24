@@ -137,3 +137,23 @@ a scan remain on stderr through the existing CLI behavior.
   interruption cleanup, XML publication, combined-report generation, or exit codes.
 - The implementation adds no dependency, callback framework, dynamic terminal UI,
   or new command-line option.
+
+## Execution Notes
+
+- Implemented runner-owned, flushed stdout lines for the resume-aware startup state,
+  each job start, every success and failure transition, and aggregate 30-second
+  heartbeats. Per-job elapsed durations use the existing monotonic clock, and all
+  aggregate counts are derived from the scheduler's existing collections.
+- Updated `nwrapper/runner.py`, focused runner tests, and the README. Scheduling,
+  result models, CLI options, debug logging, XML handling, and report merging were
+  not changed.
+- Added deterministic coverage for normal and already-complete runs, process launch
+  and exit failures, XML validation and promotion failures, flushed output, and the
+  heartbeat deadline without real sleeping or real Nmap processes.
+- No material deviations from the plan were required.
+- Validation passed with 37 tests, `ruff check .`, `mypy`, the focused runner format
+  check, and `git diff --check`. The repository's pre-existing formatter differences
+  in unchanged portions of `tests/test_runner.py` were deliberately left untouched.
+- Implementation commit: `0fc2a89`.
+- Progress bars, colors, output-control flags, machine-readable events, ETAs, raw
+  Nmap streaming, and scheduler redesign remain deliberately excluded.
