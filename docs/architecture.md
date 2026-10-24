@@ -5,7 +5,7 @@ jobs while preserving exact host-to-TCP-port relationships.
 
 ## Invariants
 
-1. The project is TCP-only.
+1. The project is IPv4 TCP-only.
 2. Every open TCP `(address, port)` pair from the input appears in exactly one
    planned job.
 3. A planned job does not introduce a port that Masscan did not report for
@@ -23,6 +23,7 @@ jobs while preserving exact host-to-TCP-port relationships.
   job identifiers.
 - `manifest.py`: serialize plans atomically.
 - `runlog.py`: configure the append-only per-output-directory diagnostic log.
+- `workspace.py`: enforce one active writer for each scan output directory.
 - `runner.py`: construct Nmap argument vectors and own bounded subprocess
   concurrency, cancellation, and atomic XML promotion.
 - `nmap_xml.py`: validate that per-job XML is complete for exactly its planned
@@ -40,10 +41,11 @@ planned -> running -> validating -> complete
 ```
 
 Nmap writes to `<job-id>.xml.partial`. After a successful exit and XML
-validation, the runner atomically renames that file to `<job-id>.xml`. The
-final XML itself is the completion record; the manifest remains an immutable
-description of the current plan. Interrupted, failed, or malformed jobs are
-rerun, while valid final XML is skipped.
+validation, the runner atomically renames that file to `<job-id>.xml`.
+Validation rejects unsuccessful runs, timed-out hosts, malformed XML, and
+target mismatches. The final XML itself is the completion record; the manifest
+remains an immutable description of the current plan. Interrupted, failed,
+timed-out, or malformed jobs are rerun, while valid final XML is skipped.
 
 Large groups are split into bounded chunks so job-level reruns remain cheap
 and the scheduler has enough work to use its configured concurrency.
@@ -53,6 +55,10 @@ at DEBUG level. Run boundaries, effective settings, process launches and exit
 codes, resume decisions, XML validation failures, detected Nmap host timeouts,
 interrupt cleanup, and report publication are logged there. Per-job `.log`
 files remain the non-duplicated source for raw Nmap stdout and stderr.
+
+The scan command holds an advisory lock on `<output-dir>/.nwrapper.lock` for
+the full plan, run, and merge lifecycle. A second writer fails immediately
+instead of sharing fixed manifest, partial XML, log, or combined-report paths.
 
 ## Combined report lifecycle
 

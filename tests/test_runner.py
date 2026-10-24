@@ -56,7 +56,9 @@ class FakeProcess:
             )
             ET.SubElement(host, "address", addr=target, addrtype="ipv4")
         runstats = ET.SubElement(root, "runstats")
-        ET.SubElement(runstats, "finished", time="2", elapsed="1.0")
+        ET.SubElement(
+            runstats, "finished", time="2", elapsed="1.0", exit="success"
+        )
         ET.SubElement(runstats, "hosts", up=str(len(targets)), total=str(len(targets)))
         ET.ElementTree(root).write(path, encoding="unicode", xml_declaration=True)
 
@@ -166,7 +168,11 @@ def test_run_jobs_skips_valid_results(
     jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir()
     FakeProcess._write_xml(jobs_dir / "existing.xml", job.targets)
-    monkeypatch.setattr("nwrapper.runner.shutil.which", lambda _: "/usr/bin/nmap")
+
+    def unexpected_lookup(_: str) -> str:
+        raise AssertionError("Nmap lookup is unnecessary for completed jobs")
+
+    monkeypatch.setattr("nwrapper.runner.shutil.which", unexpected_lookup)
 
     def unexpected_process(*_: object, **__: object) -> subprocess.Popen[bytes]:
         raise AssertionError("completed job was launched again")
@@ -182,7 +188,7 @@ def test_run_jobs_skips_valid_results(
     assert result.failed_ids == ()
 
 
-def test_run_jobs_logs_nmap_host_timeouts(
+def test_run_jobs_reruns_nmap_host_timeouts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     job = ScanJob("timed-out", (443,), ("192.0.2.1",))
@@ -196,17 +202,21 @@ def test_run_jobs_logs_nmap_host_timeouts(
     host.set("timedout", "true")
     tree.write(result_xml, encoding="unicode", xml_declaration=True)
     monkeypatch.setattr("nwrapper.runner.shutil.which", lambda _: "/usr/bin/nmap")
+    monkeypatch.setattr("nwrapper.runner.subprocess.Popen", FakeProcess)
     debug_log = configure_debug_log(tmp_path)
 
     result = run_jobs(
         _plan(job), tmp_path, max_processes=1, host_timeout="15m", poll_interval=0
     )
 
-    assert result.skipped == 1
-    assert (
-        "job completed with Nmap host timeouts id=timed-out "
-        "targets=192.0.2.1"
-    ) in debug_log.read_text(encoding="utf-8")
+    assert result.completed == 1
+    assert result.skipped == 0
+    assert "Nmap XML contains timed-out hosts" in debug_log.read_text(
+        encoding="utf-8"
+    )
+    final_host = ET.parse(result_xml).getroot().find("host")
+    assert final_host is not None
+    assert final_host.get("timedout") is None
 
 
 def test_run_jobs_reruns_invalid_and_partial_results(

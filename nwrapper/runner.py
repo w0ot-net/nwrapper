@@ -8,16 +8,17 @@ import shlex
 import shutil
 import subprocess
 import time
-import xml.etree.ElementTree as ET
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 
 from nwrapper.models import ScanJob, ScanPlan
-from nwrapper.nmap_xml import NmapXmlError, host_address, load_completed_xml
+from nwrapper.nmap_xml import NmapXmlError, load_completed_xml
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_HOST_TIMEOUT = "15m"
 
 
 class RunnerError(RuntimeError):
@@ -46,7 +47,7 @@ def build_nmap_command(
     job: ScanJob,
     targets_file: Path,
     partial_xml: Path,
-    host_timeout: str = "15m",
+    host_timeout: str = DEFAULT_HOST_TIMEOUT,
     nmap_binary: str = "nmap",
 ) -> list[str]:
     """Build, but do not execute, one exact TCP service scan command."""
@@ -81,24 +82,9 @@ def _paths(jobs_dir: Path, job: ScanJob) -> tuple[Path, Path, Path, Path]:
     )
 
 
-def _log_host_timeouts(root: ET.Element, job: ScanJob, source: Path) -> None:
-    timed_out = [
-        host_address(host)
-        for host in root.findall("host")
-        if host.get("timedout") == "true"
-    ]
-    if timed_out:
-        logger.warning(
-            "job completed with Nmap host timeouts id=%s targets=%s source=%s",
-            job.identifier,
-            ",".join(timed_out),
-            source,
-        )
-
-
 def _is_complete(path: Path, job: ScanJob) -> bool:
     try:
-        root = load_completed_xml(path, job.targets)
+        load_completed_xml(path, job.targets)
     except NmapXmlError as exc:
         logger.debug(
             "job result is not reusable id=%s path=%s reason=%s",
@@ -107,7 +93,6 @@ def _is_complete(path: Path, job: ScanJob) -> bool:
             exc,
         )
         return False
-    _log_host_timeouts(root, job, path)
     return True
 
 
@@ -190,16 +175,11 @@ def run_jobs(
     if not host_timeout:
         raise ValueError("host timeout must not be empty")
 
-    resolved_nmap = shutil.which(nmap_binary)
-    if resolved_nmap is None:
-        raise RunnerError(f"Nmap executable not found: {nmap_binary}")
-
     logger.info(
-        "runner started jobs=%d max_processes=%d host_timeout=%s nmap=%s",
+        "runner started jobs=%d max_processes=%d host_timeout=%s",
         len(plan.jobs),
         max_processes,
         host_timeout,
-        resolved_nmap,
     )
 
     jobs_dir = output_dir / "jobs"
@@ -221,6 +201,20 @@ def run_jobs(
     active: list[_ActiveJob] = []
     completed = 0
     failed_ids: list[str] = []
+
+    if not pending:
+        logger.info(
+            "runner finished interrupted=false completed=0 skipped=%d failed=0 "
+            "duration_seconds=%.3f",
+            skipped,
+            time.monotonic() - started,
+        )
+        return RunResult(completed=0, skipped=skipped, failed_ids=())
+
+    resolved_nmap = shutil.which(nmap_binary)
+    if resolved_nmap is None:
+        raise RunnerError(f"Nmap executable not found: {nmap_binary}")
+    logger.debug("Nmap executable resolved path=%s", resolved_nmap)
 
     try:
         while pending or active:
@@ -260,7 +254,7 @@ def run_jobs(
                     )
                     continue
                 try:
-                    root = load_completed_xml(item.partial_xml, item.job.targets)
+                    load_completed_xml(item.partial_xml, item.job.targets)
                 except NmapXmlError as exc:
                     failed_ids.append(item.job.identifier)
                     logger.error(
@@ -270,7 +264,6 @@ def run_jobs(
                         exc,
                     )
                     continue
-                _log_host_timeouts(root, item.job, item.partial_xml)
                 try:
                     os.replace(item.partial_xml, item.final_xml)
                 except OSError as exc:

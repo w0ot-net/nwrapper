@@ -13,6 +13,8 @@ from nwrapper.models import ScanJob, ScanPlan
 
 def _address_key(address: str) -> tuple[int, int]:
     parsed = ipaddress.ip_address(address)
+    if parsed.version != 4:
+        raise ValueError(f"IPv6 targets are not supported: {address}")
     return parsed.version, int(parsed)
 
 

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from nwrapper.planner import build_plan
 
 
@@ -41,3 +43,8 @@ def test_plan_covers_exact_input_host_port_pairs() -> None:
     }
 
     assert planned == expected
+
+
+def test_build_plan_rejects_ipv6_targets() -> None:
+    with pytest.raises(ValueError, match="IPv6 targets are not supported"):
+        build_plan(Path("masscan.oG"), {"2001:db8::1": (443,)}, batch_size=128)

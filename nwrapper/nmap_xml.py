@@ -36,10 +36,23 @@ def load_completed_xml(path: Path, expected_targets: Iterable[str]) -> ET.Elemen
 
     if root.tag != "nmaprun":
         raise NmapXmlError(f"unexpected Nmap XML root in {path}: {root.tag!r}")
-    if root.find("./runstats/finished") is None:
+    finished = root.find("./runstats/finished")
+    if finished is None:
         raise NmapXmlError(f"Nmap XML is incomplete: {path}")
+    if finished.get("exit") != "success":
+        raise NmapXmlError(f"Nmap XML did not finish successfully: {path}")
 
-    actual = [host_address(host) for host in root.findall("host")]
+    hosts = root.findall("host")
+    timed_out = [
+        host_address(host) for host in hosts if host.get("timedout") == "true"
+    ]
+    if timed_out:
+        raise NmapXmlError(
+            f"Nmap XML contains timed-out hosts: {path} "
+            f"(targets={','.join(timed_out)})"
+        )
+
+    actual = [host_address(host) for host in hosts]
     if len(actual) != len(set(actual)):
         raise NmapXmlError(f"Nmap XML contains duplicate hosts: {path}")
 

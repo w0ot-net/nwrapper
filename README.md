@@ -3,7 +3,8 @@
 `nwrapper` turns Masscan grepable (`.oG`) TCP discoveries into exact,
 resumable Nmap service-detection jobs.
 
-The project is intentionally TCP-only. It will not schedule UDP scans.
+The project is intentionally IPv4 TCP-only. It will not accept IPv6 targets
+or schedule UDP scans.
 
 ## Why
 
@@ -36,6 +37,23 @@ one for `10.0.0.3` on port `445`.
 - automatic job-level resume after interruption or failure
 - automatic, atomic `combined.xml` generation after every complete scan
 - append-only debug logging for scan orchestration and validation decisions
+
+## Requirements and installation
+
+- Linux or another POSIX system
+- Python 3.9 or newer
+- Nmap available on `PATH`
+- Masscan to create the input `.oG` report
+
+Install from a clone in a virtual environment:
+
+```bash
+git clone https://github.com/w0ot-net/nwrapper.git
+cd nwrapper
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install .
+```
 
 ## Development
 
@@ -73,6 +91,7 @@ The output directory contains:
 
 ```text
 nwrapper-output/
+├── .nwrapper.lock
 ├── manifest.json
 ├── combined.xml
 ├── nwrapper.log
@@ -84,16 +103,21 @@ nwrapper-output/
 
 While Nmap is running, it writes `<job-id>.xml.partial`. `nwrapper` promotes
 that file to `<job-id>.xml` only after Nmap exits successfully and the XML is
-complete for the planned targets. Rerunning the same command validates and
-skips completed job XML, then reruns only missing, failed, partial, or malformed
-jobs. If any job fails, the remaining jobs continue and the command exits
-nonzero.
+complete for the planned targets. A host marked as timed out makes the job
+incomplete rather than publishing partial service results. Rerunning the same
+command validates and skips completed job XML, then reruns only missing,
+failed, timed-out, partial, or malformed jobs. If any job fails, the remaining
+jobs continue and the command exits nonzero.
 
 Every scan or resume appends timestamped DEBUG-and-higher events to
 `nwrapper.log`. It records the effective options, plan summary, job commands
 and process IDs, skip/retry decisions, exact XML validation errors, Nmap host
 timeouts, interruption cleanup, and combined-report publication. Raw Nmap
 output remains in each job's own `.log` file.
+
+Only one scan may use an output directory at a time. The hidden lock file
+prevents concurrent invocations from overwriting each other's manifest, logs,
+or XML results.
 
 The individual files under `jobs/` are the authoritative scan results.
 `combined.xml` is a derived convenience report containing every current-plan

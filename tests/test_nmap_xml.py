@@ -19,7 +19,9 @@ def _write_xml(path: Path, targets: tuple[str, ...], finished: bool = True) -> N
         ET.SubElement(host, "address", addr=target, addrtype="ipv4")
     if finished:
         runstats = ET.SubElement(root, "runstats")
-        ET.SubElement(runstats, "finished", time="1", elapsed="0.1")
+        ET.SubElement(
+            runstats, "finished", time="1", elapsed="0.1", exit="success"
+        )
         ET.SubElement(runstats, "hosts", up=str(len(targets)), total=str(len(targets)))
     ET.ElementTree(root).write(path, encoding="unicode", xml_declaration=True)
 
@@ -49,6 +51,32 @@ def test_load_completed_xml_rejects_incomplete_results(tmp_path: Path) -> None:
     _write_xml(path, ("192.0.2.1",), finished=False)
 
     with pytest.raises(NmapXmlError, match="incomplete"):
+        load_completed_xml(path, ("192.0.2.1",))
+
+
+def test_load_completed_xml_rejects_unsuccessful_results(tmp_path: Path) -> None:
+    path = tmp_path / "result.xml"
+    _write_xml(path, ("192.0.2.1",))
+    tree = ET.parse(path)
+    finished = tree.getroot().find("./runstats/finished")
+    assert finished is not None
+    finished.set("exit", "error")
+    tree.write(path, encoding="unicode", xml_declaration=True)
+
+    with pytest.raises(NmapXmlError, match="did not finish successfully"):
+        load_completed_xml(path, ("192.0.2.1",))
+
+
+def test_load_completed_xml_rejects_timed_out_hosts(tmp_path: Path) -> None:
+    path = tmp_path / "result.xml"
+    _write_xml(path, ("192.0.2.1",))
+    tree = ET.parse(path)
+    host = tree.getroot().find("host")
+    assert host is not None
+    host.set("timedout", "true")
+    tree.write(path, encoding="unicode", xml_declaration=True)
+
+    with pytest.raises(NmapXmlError, match="timed-out hosts.*192.0.2.1"):
         load_completed_xml(path, ("192.0.2.1",))
 
 

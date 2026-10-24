@@ -14,11 +14,16 @@ class MasscanParseError(ValueError):
 def _parse_address(host_field: str, line_number: int) -> str:
     value = host_field.removeprefix("Host:").strip().split(maxsplit=1)[0]
     try:
-        return str(ipaddress.ip_address(value))
+        address = ipaddress.ip_address(value)
     except ValueError as exc:
         raise MasscanParseError(
             f"line {line_number}: invalid host address {value!r}"
         ) from exc
+    if address.version != 4:
+        raise MasscanParseError(
+            f"line {line_number}: IPv6 targets are not supported: {value!r}"
+        )
+    return str(address)
 
 
 def parse_grepable(path: Path) -> dict[str, tuple[int, ...]]:

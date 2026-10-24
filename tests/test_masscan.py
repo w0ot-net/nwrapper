@@ -35,3 +35,14 @@ def test_parse_grepable_rejects_invalid_addresses(tmp_path: Path) -> None:
 
     with pytest.raises(MasscanParseError, match="invalid host address"):
         parse_grepable(report)
+
+
+def test_parse_grepable_rejects_ipv6_targets(tmp_path: Path) -> None:
+    report = tmp_path / "scan.oG"
+    report.write_text(
+        "Host: 2001:db8::1 ()\tPorts: 443/open/tcp//https///\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(MasscanParseError, match="IPv6 targets are not supported"):
+        parse_grepable(report)

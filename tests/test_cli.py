@@ -27,6 +27,18 @@ def test_plan_command_writes_manifest(tmp_path: Path) -> None:
     assert manifest["jobs"][0]["targets"] == ["192.0.2.1", "192.0.2.2"]
 
 
+def test_plan_command_reports_runtime_errors_without_usage(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    missing = tmp_path / "missing.oG"
+
+    assert main(["plan", str(missing)]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.err.startswith("Error:")
+    assert "usage:" not in captured.err
+
+
 def test_scan_command_writes_manifest_and_reports_failures(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -91,7 +103,9 @@ def test_scan_command_rebuilds_combined_xml_when_all_jobs_are_skipped(
 
     assert main(["scan", str(report), "--output-dir", str(output_dir)]) == 0
     assert combined.read_text(encoding="utf-8") == "rebuilt"
-    assert "Wrote" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert output.startswith(f"Debug log: {output_dir / 'nwrapper.log'}\n")
+    assert "Wrote" in output
 
 
 def test_scan_command_does_not_merge_after_interrupt(
