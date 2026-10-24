@@ -34,9 +34,7 @@ one for `10.0.0.3` on port `445`.
 - bounded concurrent `nmap -Pn -n -sV` execution
 - validated, atomic XML results for each job
 - automatic job-level resume after interruption or failure
-
-A combined XML report is the remaining implementation stage. The component
-boundaries are documented in [docs/architecture.md](docs/architecture.md).
+- automatic, atomic `combined.xml` generation after every complete scan
 
 ## Development
 
@@ -75,6 +73,7 @@ The output directory contains:
 ```text
 nwrapper-output/
 ├── manifest.json
+├── combined.xml
 └── jobs/
     ├── <job-id>.targets
     ├── <job-id>.log
@@ -87,5 +86,12 @@ complete for the planned targets. Rerunning the same command validates and
 skips completed job XML, then reruns only missing, failed, partial, or malformed
 jobs. If any job fails, the remaining jobs continue and the command exits
 nonzero.
+
+The individual files under `jobs/` are the authoritative scan results.
+`combined.xml` is a derived convenience report containing every current-plan
+host in deterministic order. `nwrapper` removes an old combined report when a
+scan starts and rebuilds it only after all jobs are complete. This also means
+rerunning a completed scan launches no Nmap processes but still regenerates
+`combined.xml` from the validated job XML files.
 
 Only scan systems you own or are explicitly authorized to assess.

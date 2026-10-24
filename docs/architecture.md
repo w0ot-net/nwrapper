@@ -26,9 +26,10 @@ jobs while preserving exact host-to-TCP-port relationships.
   concurrency, cancellation, and atomic XML promotion.
 - `nmap_xml.py`: validate that per-job XML is complete for exactly its planned
   targets.
-- Future `xmlmerge.py`: validate completed job XML files, collect their
-  `<host>` elements, and create truthful aggregate run statistics without
-  copying one job's scan metadata as though it described every job.
+- `xmlmerge.py`: validate current-plan job XML files, collect their `<host>`
+  elements in plan order, and atomically publish truthful aggregate run
+  statistics without copying one job's scan metadata as though it described
+  every job.
 
 ## Intended job lifecycle
 
@@ -45,3 +46,17 @@ rerun, while valid final XML is skipped.
 
 Large groups are split into bounded chunks so job-level reruns remain cheap
 and the scheduler has enough work to use its configured concurrency.
+
+## Combined report lifecycle
+
+The scan command removes any prior `combined.xml` before starting or resuming
+a plan. Once every current-plan job is complete, the merger reads only those
+job IDs, creates a fresh Nmap-shaped root, copies each expected host exactly
+once in plan order, and derives timing, version, and host statistics across
+all jobs. Orphan XML files are ignored.
+
+The merger writes `combined.xml.partial`, parses it as a final sanity check,
+and atomically promotes it to `combined.xml`. A failed or interrupted scan
+therefore has no report that looks current. The authoritative per-job XML is
+never modified, so a fully completed rerun can validate and skip every Nmap
+job while rebuilding the derived report.

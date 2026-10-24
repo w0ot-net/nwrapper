@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from nwrapper.masscan import MasscanParseError, parse_grepable
 from nwrapper.models import ScanPlan
 from nwrapper.planner import build_plan
 from nwrapper.runner import RunnerError, run_jobs
+from nwrapper.xmlmerge import XmlMergeError, merge_completed_xml
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -101,6 +103,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             plan = _load_plan(args.input, args.batch_size)
             if args.jobs < 1:
                 raise ValueError("jobs must be at least 1")
+            combined_xml = args.output_dir / "combined.xml"
+            combined_xml.unlink(missing_ok=True)
             write_plan(plan, args.output_dir / "manifest.json")
             result = run_jobs(
                 plan,
@@ -119,7 +123,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"Failed job IDs: {', '.join(result.failed_ids)}")
         if result.interrupted:
             return 130
-        return 1 if result.failed_ids else 0
+        if result.failed_ids:
+            return 1
+
+        try:
+            merge_completed_xml(plan, args.output_dir / "jobs", combined_xml)
+        except (OSError, XmlMergeError) as exc:
+            print(f"Could not create combined XML: {exc}", file=sys.stderr)
+            return 1
+        print(f"Wrote {combined_xml}")
+        return 0
 
     parser.error(f"unsupported command: {args.command}")
     return 2
